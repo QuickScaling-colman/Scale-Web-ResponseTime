@@ -1,0 +1,4 @@
+{
+	"DB" : { "host" : "ds021751.mlab.com", "port": 21751, "username" : "Quickscaling", "password": "Quickscaling123","db_name": "quickscaling","authMechanism":"SCRAM-SHA-1" },
+	"PeriodicConf": {"PeriodicTime" : 30000}
+}
