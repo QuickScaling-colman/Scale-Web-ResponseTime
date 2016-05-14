@@ -44,6 +44,15 @@ public class MongoWebsite extends AbstractVerticle{
 			
 		});
 		
+		eb.consumer("SAVE_SCALE", request -> {
+			JsonObject jsonResponseTime = new JsonObject(request.body().toString());
+			
+			_mongoClient.insert("websitesScale", jsonResponseTime , res -> {
+				request.reply(res.succeeded());
+			});
+			
+		});
+		
 		startFuture.complete();
 	}
 	
