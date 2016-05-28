@@ -46,7 +46,7 @@ public class CheckWebsites extends AbstractVerticle {
 	private void getScale() {
 		HttpClient client = vertx.createHttpClient();
 		
-		client.get(8080,"193.106.55.35","/api/v1/namespaces/default/replicationcontrollers/geoserver-controller",response->{
+		client.get(80,"kube.quickscaling.ml","/api/v1/namespaces/default/replicationcontrollers/geoserver-controller",response->{
 			if(response.statusCode() == 200) {
 				response.bodyHandler(resHttpClient -> {
 						JsonObject replicationcontrollers = new JsonObject(resHttpClient.toString());
