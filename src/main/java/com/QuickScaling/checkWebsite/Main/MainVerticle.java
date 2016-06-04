@@ -45,20 +45,20 @@ public class MainVerticle extends AbstractVerticle
 				DeploymentOptions optionsCheckWebsites = new DeploymentOptions();
 				optionsMongo.setWorker(true);
 				
-				String envCheckWebsites = System.getProperty("QuickScaling.PeriodicConf");
+				String envCheckWebsites = System.getProperty("QuickScaling.TestingWebsiteConf");
 				
 				if(envCheckWebsites != null && envCheckWebsites != "") {
 					JsonObject mongoConfig = new JsonObject();
-					mongoConfig.put("PeriodicConf", new JsonObject(envMongo));
+					mongoConfig.put("TestingWebsiteConf", new JsonObject(envMongo));
 					optionsCheckWebsites.setConfig(mongoConfig);
-					logger.info("Load PeriodicConf config from environment variable");
-				} else if (config().getJsonObject("PeriodicConf") != null){
+					logger.info("Load TestingWebsiteConf config from environment variable");
+				} else if (config().getJsonObject("TestingWebsiteConf") != null){
 					JsonObject mongoConfig = new JsonObject();
-					mongoConfig.put("PeriodicConf", config().getJsonObject("PeriodicConf"));
+					mongoConfig.put("TestingWebsiteConf", config().getJsonObject("TestingWebsiteConf"));
 					optionsCheckWebsites.setConfig(mongoConfig);
-					logger.info("Load PeriodicConf config from configuration file");
+					logger.info("Load TestingWebsiteConf config from configuration file");
 				} else {
-					startFuture.fail("No PeriodicConf configuration");
+					startFuture.fail("No TestingWebsiteConf configuration");
 				}
 				
 				vertx.deployVerticle(new CheckWebsites(), optionsCheckWebsites);

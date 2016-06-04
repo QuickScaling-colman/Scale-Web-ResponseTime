@@ -23,51 +23,45 @@ public class CheckWebsites extends AbstractVerticle {
 	
 	@Override
 	public void start(Future<Void> startFuture) {
-		Integer PeriodicTime = config().getJsonObject("PeriodicConf").getInteger("PeriodicTime");
+		Integer PeriodicTimeResponseTime = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeResponseTime");
+		Integer PeriodicTimeScale = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeScale");
+		Integer PeriodicTimeResponseTimeSaveMongo = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeResponseTimeSaveMongo");
 		
-		CheckWebSites();
+		Integer requestTimeout = config().getJsonObject("TestingWebsiteConf").getInteger("requestTimeout");
+		JsonObject KubeSettings = config().getJsonObject("TestingWebsiteConf").getJsonObject("kubernetesConf");
 		
-		vertx.setPeriodic(PeriodicTime, res -> {
-			CheckWebSites();			
+		CheckWebSites(requestTimeout);
+		
+		vertx.setPeriodic(PeriodicTimeResponseTime, res -> {
+			CheckWebSites(requestTimeout);			
 		});
 		
-		vertx.setPeriodic(40000, res -> {
+		vertx.setPeriodic(PeriodicTimeResponseTimeSaveMongo, res -> {
 			
 			SaveToMongo();			
 		});
 		
-		vertx.setPeriodic(5000, res->{
-			getScale();
+		vertx.setPeriodic(PeriodicTimeScale, res->{
+			getScale(KubeSettings);
 		});
 		
 		startFuture.complete();
 	}
 	
-	private void getScale() {
+	private void getScale(JsonObject KubeSettings) {
 		HttpClient client = vertx.createHttpClient();
 		
-		client.get(80,"kube.quickscaling.ml","/api/v1/namespaces/default/replicationcontrollers/geoserver-controller",response->{
+		client.get(KubeSettings.getInteger("Port"),KubeSettings.getString("Host"),KubeSettings.getString("Path"),response->{
 			if(response.statusCode() == 200) {
 				response.bodyHandler(resHttpClient -> {
 						JsonObject replicationcontrollers = new JsonObject(resHttpClient.toString());
 						int replicas = replicationcontrollers.getJsonObject("status").getInteger("replicas");
 					 
-					 	SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-						
-						JsonObject MongoDate = new JsonObject();
-						MongoDate.put("$date", format.format(new Date()));
-						
-						JsonObject jsonResponseTime = new JsonObject();
-						jsonResponseTime.put("date",  MongoDate);
-						jsonResponseTime.put("replicas", replicas);
-						
-						vertx.eventBus().send("SAVE_SCALE", jsonResponseTime);
+						this.SaveScale(new Date(), replicas);
 				});
 				
 			}
 		}).end();
-		
-		
 	}
 	
 	private void SaveToMongo() {
@@ -79,7 +73,7 @@ public class CheckWebsites extends AbstractVerticle {
 		}	
 	}
 	
-	private void CheckWebSites() {
+	private void CheckWebSites(long requestTimeOut) {
 		HttpClient client = vertx.createHttpClient();
 		
 		vertx.eventBus().send("GET_ALL_WEBSITES","", res -> {
@@ -103,47 +97,17 @@ public class CheckWebsites extends AbstractVerticle {
 									currWebsite.LastCheckingTime = StartingRequest;
 									currWebsite.LastResponseTime = responseTime;
 									
-									SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-									
-									JsonObject MongoDateNumber = new JsonObject();
-									MongoDateNumber.put("$numberLong", String.valueOf(StartingRequest.getTime()));
-									
-									JsonObject MongoDate = new JsonObject();
-									MongoDate.put("$date", format.format(StartingRequest));
-									
-									JsonObject jsonResponseTime = new JsonObject();
-									jsonResponseTime.put("date",  MongoDate);
-									jsonResponseTime.put("responseTime", responseTime);
-									jsonResponseTime.put("website", currWebsite.HostName);
-									
-									allResponseTime.add(jsonResponseTime);
+									this.SaveResponseTime(StartingRequest, responseTime, currWebsite.HostName);
 									
 								});
 							} else {
-								SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-								JsonObject MongoDate = new JsonObject();
-								MongoDate.put("$date", format.format(StartingRequest));
-								
-								JsonObject jsonResponseTime = new JsonObject();
-								jsonResponseTime.put("date",  MongoDate);
-								jsonResponseTime.put("responseTime", 40000);
-								jsonResponseTime.put("website", currWebsite.HostName);
-								
-								//allResponseTime.add(jsonResponseTime);
+								this.SaveResponseTime(StartingRequest, 40000, currWebsite.HostName);
 							}
 						});
 						
 						request.exceptionHandler(response -> {
-							SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-							JsonObject MongoDate = new JsonObject();
-							MongoDate.put("$date", format.format(StartingRequest));
+							this.SaveResponseTime(StartingRequest, 40000, currWebsite.HostName);
 							
-							JsonObject jsonResponseTime = new JsonObject();
-							jsonResponseTime.put("date",  MongoDate);
-							jsonResponseTime.put("responseTime", 40000);
-							jsonResponseTime.put("website", currWebsite.HostName);
-							
-							//allResponseTime.add(jsonResponseTime);
 						});
 						
 						request.setTimeout(40000);
@@ -156,5 +120,32 @@ public class CheckWebsites extends AbstractVerticle {
 				logger.error(e.getMessage(),e);
 			}
 		});
+	}
+	
+	SimpleDateFormat formatMongo = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+	
+	private void SaveResponseTime(Date saveDate, long responseTime,String HostName) {
+		
+		JsonObject MongoDate = new JsonObject();
+		MongoDate.put("$date", formatMongo.format(saveDate));
+		
+		JsonObject jsonResponseTime = new JsonObject();
+		jsonResponseTime.put("date",  MongoDate);
+		jsonResponseTime.put("responseTime", responseTime);
+		jsonResponseTime.put("website", HostName);
+		
+		allResponseTime.add(jsonResponseTime);
+	}
+	
+	private void SaveScale(Date saveDate, int replicas) {
+		
+		JsonObject MongoDate = new JsonObject();
+		MongoDate.put("$date", formatMongo.format(new Date()));
+		
+		JsonObject jsonResponseTime = new JsonObject();
+		jsonResponseTime.put("date",  saveDate);
+		jsonResponseTime.put("replicas", replicas);
+		
+		vertx.eventBus().send("SAVE_SCALE", jsonResponseTime);
 	}
 }
