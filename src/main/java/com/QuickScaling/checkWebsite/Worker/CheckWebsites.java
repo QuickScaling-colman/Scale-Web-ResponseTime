@@ -2,11 +2,6 @@ package com.QuickScaling.checkWebsite.Worker;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
-
-import com.QuickScaling.checkWebsite.model.website;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -20,48 +15,68 @@ import io.vertx.core.logging.LoggerFactory;
 public class CheckWebsites extends AbstractVerticle { 
 	public Logger logger = LoggerFactory.getLogger(CheckWebsites.class);
 	private JsonArray allResponseTime = new JsonArray();
+	private JsonObject LastConfigurations = new JsonObject();
 	
 	@Override
 	public void start(Future<Void> startFuture) {
-		Integer PeriodicTimeResponseTime = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeResponseTime");
-		Integer PeriodicTimeScale = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeScale");
-		Integer PeriodicTimeResponseTimeSaveMongo = config().getJsonObject("TestingWebsiteConf").getInteger("PeriodicTimeResponseTimeSaveMongo");
+		CheckWebSites();
 		
-		Integer requestTimeout = config().getJsonObject("TestingWebsiteConf").getInteger("requestTimeout");
-		JsonObject KubeSettings = config().getJsonObject("TestingWebsiteConf").getJsonObject("kubernetesConf");
-		
-		CheckWebSites(requestTimeout);
-		
-		vertx.setPeriodic(PeriodicTimeResponseTime, res -> {
-			CheckWebSites(requestTimeout);			
-		});
-		
-		vertx.setPeriodic(PeriodicTimeResponseTimeSaveMongo, res -> {
-			
-			SaveToMongo();			
-		});
-		
-		vertx.setPeriodic(PeriodicTimeScale, res->{
-			getScale(KubeSettings);
+		vertx.setPeriodic(60000, res->{
+			CheckWebSites();
 		});
 		
 		startFuture.complete();
 	}
 	
-	private void getScale(JsonObject KubeSettings) {
+	private void getScale(String Name, String Host,int port, String path) {
 		HttpClient client = vertx.createHttpClient();
 		
-		client.get(KubeSettings.getInteger("Port"),KubeSettings.getString("Host"),KubeSettings.getString("Path"),response->{
+		client.get(port, Host, path, response->{
 			if(response.statusCode() == 200) {
 				response.bodyHandler(resHttpClient -> {
 						JsonObject replicationcontrollers = new JsonObject(resHttpClient.toString());
 						int replicas = replicationcontrollers.getJsonObject("status").getInteger("replicas");
+						
+						logger.debug(Name + ": " + replicas);
 					 
 						this.SaveScale(new Date(), replicas);
 				});
-				
+			} else {
+				logger.warn(Name + ": " + "Failed to read replicas(http://" + Host + ":" + port + path + ")");
 			}
 		}).end();
+	}
+	
+	private void getResponseTime(String Name, String Host,int port, String path, int Timeout) {
+		HttpClient client = vertx.createHttpClient();
+		
+		Date StartingRequest = new Date();
+		
+		HttpClientRequest request = client.get(port,Host,path, response -> {
+			logger.debug(Name + ": " + response.statusCode());
+			if(response.statusCode() == 200) {
+				response.bodyHandler(resHttpClient -> {
+					Date EndRequest = new Date();
+					
+					long responseTime = EndRequest.getTime() - StartingRequest.getTime();
+
+					this.SaveResponseTime(StartingRequest, responseTime, Name);
+					
+				});
+			} else {
+				this.SaveResponseTime(StartingRequest, Timeout, Name);
+			}
+		});
+		
+		request.exceptionHandler(response -> {
+			this.SaveResponseTime(StartingRequest, Timeout, Name);
+			
+		});
+		
+		request.setTimeout(Timeout);
+		request.end();
+		
+		
 	}
 	
 	private void SaveToMongo() {
@@ -70,48 +85,49 @@ public class CheckWebsites extends AbstractVerticle {
 		
 		for (int i = 0; i < arraycopy.size(); i++) {
 			vertx.eventBus().send("SAVE_RESPONSE_TIME", arraycopy.getJsonObject(i));
-		}	
+		}
+		
+		logger.info("Finish save responseTime array To Mongo");
 	}
 	
-	private void CheckWebSites(long requestTimeOut) {
-		HttpClient client = vertx.createHttpClient();
-		
+	private void CheckWebSites() {
 		vertx.eventBus().send("GET_ALL_WEBSITES","", res -> {
-			ObjectMapper mapper = new ObjectMapper();
 			try {
-				List<website> arrWebsites = mapper.readValue(res.result().body().toString(), new TypeReference<List<website>>() {});
+				JsonArray arrWebsites = new JsonArray(res.result().body().toString());
 				
 				if(!arrWebsites.isEmpty()) {
-					for (website currWebsite : arrWebsites) {
-						Date StartingRequest = new Date();
+					for (Object currWebsite : arrWebsites) {
 						
-						logger.info(currWebsite.HostName);
-						HttpClientRequest request = client.get(currWebsite.port,currWebsite.HostName,currWebsite.path, response -> {
-							logger.info(response.statusCode());
-							if(response.statusCode() == 200) {
-								response.bodyHandler(resHttpClient -> {
-									Date EndRequest = new Date();
-									
-									long responseTime = EndRequest.getTime() - StartingRequest.getTime();
-									
-									currWebsite.LastCheckingTime = StartingRequest;
-									currWebsite.LastResponseTime = responseTime;
-									
-									this.SaveResponseTime(StartingRequest, responseTime, currWebsite.HostName);
-									
-								});
-							} else {
-								this.SaveResponseTime(StartingRequest, 40000, currWebsite.HostName);
+						JsonObject jocurrWebsite = (JsonObject) currWebsite;
+						
+					
+						JsonObject ReponseTimeConf = jocurrWebsite.getJsonObject("ResponseTimeConf");
+						JsonObject ScaleConf = jocurrWebsite.getJsonObject("ScaleConf");
+						
+						if(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")) != null) {
+							JsonObject lastResponseTimeConf = LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getJsonObject("ResponseTimeConf");
+							if(!lastResponseTimeConf.equals(ReponseTimeConf)){
+								logger.info("reload ReponseTime configuration");
+								
+								runPeriodicResponseTime(jocurrWebsite,ReponseTimeConf);
+								LastConfigurations.put(jocurrWebsite.getString("name"), jocurrWebsite);
 							}
-						});
-						
-						request.exceptionHandler(response -> {
-							this.SaveResponseTime(StartingRequest, 40000, currWebsite.HostName);
 							
-						});
-						
-						request.setTimeout(40000);
-						request.end();
+							JsonObject lastScaleConf = LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getJsonObject("ScaleConf");
+							
+							if(!lastScaleConf.equals(ScaleConf)){
+								logger.info("reload scale configuration");
+								
+								runPeriodicScale(jocurrWebsite,ScaleConf);
+								LastConfigurations.put(jocurrWebsite.getString("name"), jocurrWebsite);
+							}
+						} else {
+							runPeriodicResponseTime(jocurrWebsite,ReponseTimeConf);
+							
+							runPeriodicScale(jocurrWebsite,ScaleConf);
+							
+							LastConfigurations.put(jocurrWebsite.getString("name"), jocurrWebsite);
+						}
 					}
 				} else {
 					logger.warn("No websites exist in DB");
@@ -120,6 +136,67 @@ public class CheckWebsites extends AbstractVerticle {
 				logger.error(e.getMessage(),e);
 			}
 		});
+	}
+	
+	private void runPeriodicResponseTime(JsonObject jocurrWebsite,JsonObject ReponseTimeConf) {
+		
+		if(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")) != null && 
+		   LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeResponseTime") != null) {
+			vertx.cancelTimer(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeResponseTime"));
+			logger.info("cancel Timer: " + LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeResponseTime"));
+		}
+		
+		int PeriodicTimeResponseTime = ReponseTimeConf.getInteger("PeriodicTime");
+		
+		long idPeriodicTimeResponseTime = vertx.setPeriodic(PeriodicTimeResponseTime, resResponse -> {
+			getResponseTime(jocurrWebsite.getString("name"),
+							ReponseTimeConf.getString("HostName"),
+							ReponseTimeConf.getInteger("Port"),
+							ReponseTimeConf.getString("Path"),
+							ReponseTimeConf.getInteger("requestTimeout"));			
+		});
+		
+		logger.debug("start Timer: " + idPeriodicTimeResponseTime);
+		
+		jocurrWebsite.put("idPeriodicTimeResponseTime", idPeriodicTimeResponseTime);
+		
+		if(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")) != null && 
+		   LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeSaveToMongo") != null) {
+			vertx.cancelTimer(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeSaveToMongo"));
+			logger.info("cancel Timer: " + LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idPeriodicTimeSaveToMongo"));
+		}
+		
+		int PeriodicTimeSaveToMongo = ReponseTimeConf.getInteger("PeriodicTimeSaveToMongo");
+		
+		long idPeriodicTimeSaveToMongo = vertx.setPeriodic(PeriodicTimeSaveToMongo, resSaveToMongo -> {
+			SaveToMongo();			
+		});
+		
+		logger.debug("start Timer: " + idPeriodicTimeSaveToMongo);
+		
+		jocurrWebsite.put("idPeriodicTimeSaveToMongo", idPeriodicTimeSaveToMongo);
+	}
+	
+	private void runPeriodicScale(JsonObject jocurrWebsite,JsonObject ScaleConf) {
+		if(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")) != null && 
+		   LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idkubernetesConf") != null) {
+			vertx.cancelTimer(LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idkubernetesConf"));
+			logger.info("cancel Timer: " + LastConfigurations.getJsonObject(jocurrWebsite.getString("name")).getLong("idkubernetesConf"));
+		}
+			
+		JsonObject kubernetesConf = ScaleConf.getJsonObject("kubernetesConf");
+		
+		long idkubernetesConf = vertx.setPeriodic(ScaleConf.getInteger("PeriodicTime"), resScale ->{
+			
+			getScale(jocurrWebsite.getString("name"),
+					 kubernetesConf.getString("HostName"),
+					 kubernetesConf.getInteger("Port"),
+					 kubernetesConf.getString("Path"));
+		});
+		
+		logger.debug("start Timer: " + idkubernetesConf);
+		
+		jocurrWebsite.put("idkubernetesConf", idkubernetesConf);
 	}
 	
 	SimpleDateFormat formatMongo = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
@@ -143,7 +220,7 @@ public class CheckWebsites extends AbstractVerticle {
 		MongoDate.put("$date", formatMongo.format(new Date()));
 		
 		JsonObject jsonResponseTime = new JsonObject();
-		jsonResponseTime.put("date",  saveDate);
+		jsonResponseTime.put("date", MongoDate);
 		jsonResponseTime.put("replicas", replicas);
 		
 		vertx.eventBus().send("SAVE_SCALE", jsonResponseTime);

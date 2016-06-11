@@ -44,24 +44,9 @@ public class MainVerticle extends AbstractVerticle
 			if(res.succeeded()) {
 				DeploymentOptions optionsCheckWebsites = new DeploymentOptions();
 				optionsMongo.setWorker(true);
+
 				
-				String envCheckWebsites = System.getProperty("QuickScaling.TestingWebsiteConf");
-				
-				if(envCheckWebsites != null && envCheckWebsites != "") {
-					JsonObject mongoConfig = new JsonObject();
-					mongoConfig.put("TestingWebsiteConf", new JsonObject(envMongo));
-					optionsCheckWebsites.setConfig(mongoConfig);
-					logger.info("Load TestingWebsiteConf config from environment variable");
-				} else if (config().getJsonObject("TestingWebsiteConf") != null){
-					JsonObject mongoConfig = new JsonObject();
-					mongoConfig.put("TestingWebsiteConf", config().getJsonObject("TestingWebsiteConf"));
-					optionsCheckWebsites.setConfig(mongoConfig);
-					logger.info("Load TestingWebsiteConf config from configuration file");
-				} else {
-					startFuture.fail("No TestingWebsiteConf configuration");
-				}
-				
-				vertx.deployVerticle(new CheckWebsites(), optionsCheckWebsites);
+				vertx.deployVerticle(new CheckWebsites(),optionsCheckWebsites);
 			}
 		});
 		

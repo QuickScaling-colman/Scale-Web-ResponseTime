@@ -1,11 +1,4 @@
 {
-	"DB" : { "host" : "ds021751.mlab.com", "port": 21751, "username" : "Quickscaling", "password": "Quickscaling123","db_name": "quickscaling","authMechanism":"SCRAM-SHA-1" },
-	"TestingWebsiteConf": {"PeriodicTimeResponseTime" : 1000,
-						   "PeriodicTimeResponseTimeSaveMongo" : 40000,
-						   "PeriodicTimeScale" : 5000,
-						   "requestTimeout": 40000,
-						   "kubernetesConf":{"Host":"kube.quickscaling.ml",
-						   					 "Port":80,
-						   					 "Path":"/api/v1/namespaces/default/replicationcontrollers/geoserver-controller"}},
+	"DB" : { "host" : "193.106.55.35", "port": 27017,"db_name": "quickscaling","authMechanism":"SCRAM-SHA-1" },
 	"WebServer": {"Port" : 8085}
 }
